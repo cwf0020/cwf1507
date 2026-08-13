@@ -1,0 +1,13 @@
+{
+  "name": "caiwenfeng-ops-backend",
+  "version": "1.0.0",
+  "private": true,
+  "description": "蔡文锋业绩工作台可写小后端（零依赖 Node）",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "engines": {
+    "node": ">=16"
+  }
+}

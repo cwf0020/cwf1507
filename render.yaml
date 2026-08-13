@@ -1,0 +1,17 @@
+# Render Blueprint —— 蔡文锋工作台可写后端（云端双向同步）
+# 部署步骤：Render 控制台 → New → Blueprint → 连接包含本文件的 GitHub 仓库 → 一键拉起。
+# 部署后在 Environment 里给 OPS_TOKEN 填一个自定义值（写入令牌）。
+services:
+  - type: web
+    name: caiwenfeng-ops-backend
+    runtime: node
+    rootDir: .
+    plan: free
+    buildCommand: "true"
+    startCommand: "node server.js"
+    healthCheckPath: /api/data
+    envVars:
+      - key: PORT
+        value: 3000
+      - key: OPS_TOKEN
+        sync: false
