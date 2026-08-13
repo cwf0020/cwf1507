@@ -58,12 +58,12 @@ function loadWB() {
     if (fs.existsSync(WB_FILE)) {
       const raw = fs.readFileSync(WB_FILE, "utf8");
       const j = JSON.parse(raw);
-      return { 打新提醒: j["打新提醒"] || [], 打金币: j["打金币"] || [], _updatedAt: j._updatedAt || null };
+      return { 打新提醒: j["打新提醒"] || [], 打金币: j["打金币"] || [], tombstones: j.tombstones || [], _updatedAt: j._updatedAt || null };
     }
   } catch (e) {
     console.error("[loadWB] 读取失败:", e.message);
   }
-  return { 打新提醒: [], 打金币: [], _updatedAt: null };
+  return { 打新提醒: [], 打金币: [], tombstones: [], _updatedAt: null };
 }
 function saveWB(wb) {
   ensureDataDir();
@@ -83,6 +83,30 @@ function mergeArr(local, remote, key) {
   (remote || []).forEach(add);
   return [...map.values()];
 }
+// 按 type+key 合并删除标记（tombstone）：保留 _ts 较新者
+function mergeTomb(local, remote) {
+  const map = new Map();
+  const add = (t) => {
+    if (!t || !t.type || t.key == null) return;
+    const k = t.type + "\u0001" + t.key;
+    const prev = map.get(k);
+    if (!prev) { map.set(k, t); return; }
+    if ((t._ts || 0) >= (prev._ts || 0)) map.set(k, t);
+  };
+  (local || []).forEach(add);
+  (remote || []).forEach(add);
+  return [...map.values()];
+}
+// 用删除标记过滤已合并的数组：记录 _ts 不新于 tombstone 则视为已删除
+function applyTomb(wb) {
+  const tsMap = new Map();
+  (wb.tombstones || []).forEach((t) => { if (!t || !t.type || t.key == null) return; tsMap.set(t.type + "\u0001" + t.key, t); });
+  const dead = (type, key, ts) => { const t = tsMap.get(type + "\u0001" + key); if (!t) return false; return (ts || 0) <= (t._ts || 0); };
+  const out = { ...wb };
+  if (out["打新提醒"]) out["打新提醒"] = out["打新提醒"].filter((r) => !dead("打新提醒", r["代码"], r._ts));
+  if (out["打金币"]) out["打金币"] = out["打金币"].filter((r) => !dead("打金币", r["日期"], r._ts));
+  return out;
+}
 
 async function handlePostData(req, res) {
   const token = getToken(req, new URL(req.url, "http://localhost"));
@@ -99,11 +123,13 @@ async function handlePostData(req, res) {
   const wb = {
     打新提醒: mergeArr(cur["打新提醒"], j["打新提醒"], "代码"),
     打金币: mergeArr(cur["打金币"], j["打金币"], "日期"),
+    tombstones: mergeTomb(cur.tombstones || [], j.tombstones || []),
     _updatedAt: new Date().toISOString(),
   };
   try { saveWB(wb); } catch (e) { sendJSON(res, 500, { ok: false, error: e.message }); return; }
-  console.log("[POST /api/data] 合并完成 bonds=", wb["打新提醒"].length, "coins=", wb["打金币"].length);
-  sendJSON(res, 200, { ok: true, _updatedAt: wb._updatedAt, 打新提醒: wb["打新提醒"], 打金币: wb["打金币"] });
+  const out = applyTomb(wb);
+  console.log("[POST /api/data] 合并完成 bonds=", out["打新提醒"].length, "coins=", out["打金币"].length, "tomb=", wb.tombstones.length);
+  sendJSON(res, 200, { ok: true, _updatedAt: wb._updatedAt, 打新提醒: out["打新提醒"], 打金币: out["打金币"], tombstones: wb.tombstones });
 }
 
 const MIME = {
@@ -274,7 +300,7 @@ const server = http.createServer(async (req, res) => {
 
   // 用户数据云同步（读取 / 合并写入）
   if (p === "/api/data" && req.method === "GET") {
-    const wb = loadWB();
+    const wb = applyTomb(loadWB());
     sendJSON(res, 200, wb);
     return;
   }
